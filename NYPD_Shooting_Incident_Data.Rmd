@@ -1,0 +1,87 @@
+---
+title: "NYPD_Shooting_Incident_Data"
+date: "2024-09-27"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+## NYPD Shooting Incident Data
+
+The source data is a breakdown of every shooting incident that occurred in NYC going back to 2006 through the end of the previous calendar year.
+
+### Get Data
+
+```{r get_data}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+data <- read_csv(url_in, show_col_types = FALSE)
+```
+
+### Filter Data to Seasonal Shootings and Deaths
+```{r filter_seasonal_data}
+location_data <- data %>% select( -c(Lon_Lat, LOC_CLASSFCTN_DESC, LOC_OF_OCCUR_DESC, X_COORD_CD, Y_COORD_CD, VIC_RACE, VIC_SEX, VIC_AGE_GROUP, PERP_RACE, PERP_SEX, PERP_AGE_GROUP, LOCATION_DESC, JURISDICTION_CODE, OCCUR_TIME, INCIDENT_KEY)) %>% rename(DEATH = STATISTICAL_MURDER_FLAG, LAT = Latitude, LON = Longitude, DATE = OCCUR_DATE) %>% mutate(DATE, mdy(DATE)) %>% mutate(IS_DEATH=ifelse(DEATH, 1, 0), .after=DEATH) %>% mutate(NOT_DEATH=ifelse(DEATH, 0, 1), .after=IS_DEATH) %>% mutate(SHOOTING=1) %>% select( -c(DATE)) %>% rename(DATE = 'mdy(DATE)') %>% mutate(SEASON=ifelse(month(DATE) %in% c(3, 4, 5), "01-SPR", ifelse(month(DATE) %in% c(6, 7, 8), "02-SUM", ifelse(month(DATE) %in% c(9, 10, 11), "03-FAL", ifelse(month(DATE) %in% c(12, 1, 2), "04-WIN", "")))), .after=DATE) %>% mutate(YEAR=year(DATE), .after=DATE)
+```
+
+### Group by Year/Season
+```{r year_and_season}
+seasonal_data <- location_data %>% group_by(YEAR, SEASON) %>% summarize(shootings = sum(SHOOTING), deaths = sum(IS_DEATH)) %>% mutate(YEAR_SEASON=paste0(YEAR,"_",SEASON), .after=SEASON) %>% select(YEAR, SEASON, YEAR_SEASON, shootings, deaths) %>% arrange(YEAR, SEASON) %>% ungroup()
+```
+
+### Graph Shootings By Season
+```{r shootings_by_season}
+seasonal_shootings_graph <- seasonal_data %>% ggplot(., aes(x = YEAR_SEASON, y = shootings, color = "shootings", group = 1)) + geom_point() + geom_line() + theme(legend.position= "bottom", axis.text.x = element_text(angle = 60)) + labs(title = "Seasonal Shootings ", x = "Year / Season", y = "Shootings")
+seasonal_shootings_graph
+```
+
+As you can see, there is seasonality to the shootings that occur in New York City. The peak is always in summer of each year, although the height of peaks and valleys changes from year to year.
+
+### Graph Deaths By Season
+```{r deaths_by_season}
+seasonal_deaths_graph <- seasonal_data %>% ggplot(., aes(x = YEAR_SEASON, y = deaths, color = "deaths", group = 1)) + geom_point() + geom_line() + theme(legend.position= "bottom", axis.text.x = element_text(angle = 60)) + labs(title = "Seasonal  Deaths", x = "Year / Season", y = "Shooting Deaths")
+seasonal_deaths_graph
+```
+
+As shown above, there is also seasonality to the shooting deaths that occur in New York City, although the seasonality is not quite as clear. The peak is usually in summer of each year, although there are years where seasons bordering summer (spring or fall) have slightly more shooting deaths or just slightly less shooting deaths than does the summer season. The height of peaks and valleys continues to change from year to year.
+
+### Model: Predict Deaths Per Season based on Shootings Per Season
+```{r deaths_model}
+mod <- lm(deaths ~ shootings, data = seasonal_data)
+```
+
+The model attempts to predict the number of deaths person season based on the number of shootings per season.
+
+### Add death prediction to the seasonal data
+```{r add_death_prediction}
+seasonal_data_w_death_prediction <- seasonal_data %>% mutate(PRED = predict(mod))
+```
+
+### Graph Prediction Deaths vs. Actual Deaths Per Season
+```{r graph_predicted_deaths_vs_actual_deaths}
+seasonal_data_w_death_prediction %>% ggplot() + geom_point(aes(x = YEAR_SEASON, y = deaths), color="red") + geom_line(aes(x = YEAR_SEASON, y = deaths, group = 1), color="red") + geom_point(aes(x = YEAR_SEASON, y = PRED), color="green") + geom_line(aes(x = YEAR_SEASON, y = PRED, group = 1), color="green") + theme(legend.position= "bottom", axis.text.x = element_text(angle = 60)) + labs(title = "Seasonal Deaths Prediction From Seasonal Shootings ", x = "Year / Season", y = "Deaths Real (Red) vs. Predicted (Green)")
+```
+
+As shown above, the model that uses shootings per season to predict shooting death per season in New York City is relatively accurate. The green line is the prediction and its line follows pretty closely to the actual deaths that occur each season, actual deaths being shown by the red dots and line.
+
+### Biases
+
+The analysis conducted here is quite simple. Seasons were classified by month of the year and each season contains exactly three months (Spring = March/April/May, Summer = June/July/August, Fall = September/October/November, Winter = December/January/February).
+
+There are weather-related biases that exist that are overlooked by this simple definition of a "season". Weather, temperature, elements, etc. can all likely affect occurrences of shootings and those variables were not taken into account here. Holidays, which are sometimes seasonally related, may also affect the incidence of shootings. Cultural activities (sporting events, concerts, etc.), which are not always directly related to seasonality, may also affect shooting incidence.
+
+Other biases that may exist could be the under-reporting or misclassification of shootings and homocides, which would lead to incorrect analysis of the shootings and deaths as a whole.
+
+Confirmation bias may also have played a role in this analysis as my hypothesis before the analysis was conducted was that there is a seasonal aspect to shootings, and possibly to shooting deaths. It's possible that I conducted the analysis in a way that more easily confirmed my hypothesis.
+
+### Session Info
+
+```{r session_info}
+print(sessionInfo())
+```
+
+
